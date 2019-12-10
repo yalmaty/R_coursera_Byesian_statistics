@@ -1,0 +1,390 @@
+---
+title: "Bayesian statisics with movie data"
+#output: 
+#  html_document: 
+#    fig_height: 4
+#    highlight: pygments
+#    theme: spacelab
+output: 
+  md_document:
+    variant: markdown_github
+    toc: true
+    fig_height: 4
+---
+
+### Load packages
+
+```{r load-packages, message = FALSE}
+library(ggplot2)
+library(statsr)
+library(BAS)
+library(gridExtra)
+library(reshape2)
+library(PairedData)
+library(tidyverse)
+library(dplyr)
+library(broom)
+```
+
+### Load data
+
+```{r load-data}
+load("movies.Rdata")
+```
+
+## Introduction
+This is a Data Analysis Project of the Bayesian Statistics course by Duke University (Coursera)
+The purpose of this project to learn what attributes make a movie popular. In this project Bayesian regression model will be developed to predict audience_score from the following explanatory variables. 
+
+Variable         | Description                                                                                            |   
+---------------- | -------------------------------------------------------------------------------------------------------|
+genre:           |Genre of movie (Action & Adventure, Comedy, Documentary, Drama, Horror, Mystery & Suspense, Other) 
+title            |Title of movie
+title_type       |Type of movie (Documentary, Feature Film, TV Movie)
+genre            |Genre of movie (Action & Adventure, Comedy, Documentary, Drama, Horror, Mystery & Suspense, Other)
+runtime          |Runtime of movie (in minutes)
+mpaa_rating      |MPAA rating of the movie (G, PG, PG-13, R, Unrated)
+studio           |Studio that produced the movie
+thtr_rel_year    |Year the movie is released in theaters
+thtr_rel_month   |Month the movie is released in theaters
+thtr_rel_day     |Day of the month the movie is released in theaters
+dvd_rel_year     |Year the movie is released on DVD
+dvd_rel_month    |Month the movie is released on DVD
+dvd_rel_day      |Day of the month the movie is released on DVD
+imdb_rating      |Rating on IMDB
+imdb_num_votes   |Number of votes on IMDB
+critics_rating   |Categorical variable for critics rating on Rotten Tomatoes (Certified Fresh, Fresh, Rotten)
+critics_score    |Critics score on Rotten Tomatoes
+audience_rating  |Categorical variable for audience rating on Rotten Tomatoes (Spilled, Upright)
+audience_score   |Audience score on Rotten Tomatoes
+best_pic_nom     |Whether or not the movie was nominated for a best picture Oscar (no, yes)
+best_pic_win     |Whether or not the movie won a best picture Oscar (no, yes)
+best_actor_win   |Whether or not one of the main actors in the movie ever won an Oscar (no, yes) -- note that this is not necessarily whether the actor won an Oscar for their role in the given movie
+best_actress win |Whether or not one of the main actresses in the movie ever won an Oscar (no, yes) -- not that this is not necessarily whether the actresses won an Oscar for their role in the given movie
+best_dir_win     |Whether or not the director of the movie ever won an Oscar (no, yes) -- not that this is not necessarily whether the director won an Oscar for the given movie
+top200_box       |Whether or not the movie is in the Top 200 Box Office list on BoxOfficeMojo (no, yes)
+director         |Director of the movie
+actor1           |First main actor/actress in the abridged cast of the movie
+actor2           |Second main actor/actress in the abridged cast of the movie
+actor3           |Third main actor/actress in the abridged cast of the movie
+actor4           |Fourth main actor/actress in the abridged cast of the movie
+actor5           |Fifth main actor/actress in the abridged cast of the movie
+imdb_url         |Link to IMDB page for the movie
+rt_url           |Link to Rotten Tomatoes page for the movie
+
+* * *
+
+## Part 1: Data
+
+The data set is comprised of 651 randomly sampled movies produced and released before 2016. We data set has 32 variables, some of these variables are only there for informational purposes and do not make any sense to include in a statistical analysis.
+
+Data Source: [Rotten Tomatoes](https://www.rottentomatoes.com/) and [IMDB](https://www.imdb.com/) APIs.  
+
+Some of the sources possible biases include:
+
+- The dataset is based on audience opinion on IMDB and Rotten Tomatoes, having mostly US users, thus international movies excluded from the set.
+
+- As per IDBM it were created 9433 films in a period of 1970 - 2016. The sample size is less than 10% and may be too small to represent the population 
+
+As the data set is randomly samlped, we can assume the data it broadly generalizable. This is an observational study where data is collected in a way that does not directly interfere with how the data arise. In general, observational studies can provide evidence of a naturally occurring association between variables, but they cannot by themselves show a causal connection.
+
+
+* * *
+
+## Part 2: Data manipulation
+Firstly, I need to construct new variables, which will be used in the project.
+
+```{r}
+summary(movies)
+```
+
+```{r}
+movies_new <- movies %>%
+              filter(!is.na(runtime), !is.na(dvd_rel_year), !is.na(dvd_rel_month), !is.na(studio)) %>%
+              mutate(feature_film   = ifelse(title_type == "Feature Film", "yes","no"),
+                     drama          = ifelse(genre == "Drama", "yes","no"),
+                     mpaa_rating_R  = ifelse(mpaa_rating == "R", "yes","no"),
+                     oscar_season   = ifelse(thtr_rel_month %in% c(10, 11, 12), "yes","no"),
+                     summer_season  = ifelse(thtr_rel_month %in% c(5, 6, 7, 8), "yes","no")) 
+```
+
+* * *
+
+## Part 3: Exploratory data analysis (EDA)
+
+We will begin EDA with the audience_score variable since it will be the response variable in the model.
+```{r}
+ggplot(data = movies_new, aes(x = audience_score)) +
+  geom_histogram(binwidth = 5)
+```  
+
+```{r}
+summary(movies_new$audience_score)
+```  
+The histogram is left-skewed with the mean 65.
+
+Let's explore new variables to check the relationship between them and the audience score.
+```{r}
+dplyr::select(movies_new, audience_score, feature_film, drama, mpaa_rating_R, oscar_season, summer_season) %>%
+  melt(measure.vars = 2:6) %>%
+  ggplot(aes(x  = value, y = audience_score, fill = variable)) +
+  geom_boxplot(fill="lightblue") +
+  labs(x = "", y = "Audience Score") + 
+  facet_grid(.~variable)
+```
+
+```{r}
+dplyr::select(movies_new, audience_score, feature_film, drama, mpaa_rating_R, oscar_season, summer_season) %>%
+  melt(measure.vars = 2:6) %>%
+  group_by(variable,value) %>%
+  summarise(avg_audience_score = mean(audience_score), count = n()) 
+```
+
+# Feature Film
+Most of variables except Feature Film and Drama have similar average audience score. We need to explore futher these variables.
+
+The <b>feature_film</b> varibale was build based on the title_type variable, so we will perform EDA based on this variable.
+
+```{r}
+ggplot(movies, aes(x=factor(title_type), y=audience_score)) +
+  geom_boxplot(fill="lightblue") +
+  labs(x = "", y = "Audience Score", title = "Audience Score by Title Type")  
+
+movies %>%
+  group_by(title_type) %>%
+  summarise(count = n(), avg_audience_score = mean(audience_score), median_audience_score = median(audience_score),
+            min_audience_score = min(audience_score), max_audience_score = max(audience_score))
+```
+
+It looks like average audience score of the Feature Films is 60.47, but Documentary films are scored much higher (83.25). In the same time we have only 5 TV Movies, which is not sufficient enough for the data analysis.
+
+Next we will conduct <i>a hypothesis test whether there is a difference between Feature and Non-Feature films.</i>
+
+$$ H_1 = H_2 $$
+$$ H_1 \ne H_2 $$
+ 
+```{r}
+statsr::bayes_inference(y = audience_score, x = feature_film, 
+                data = movies_new, statistic = "mean", 
+                type = "ht",null=0, alternative = "twosided")
+ 
+```
+
+The result showing is that there is very strong evidence against H1, which means that there is a significant difference of mean audience score between Feature and Non-Feature films.
+
+# Drama 
+The <b>drama</b> variable was build based on genre variable, which we will explore below.
+```{r}
+ggplot(movies, aes(x=factor(genre), y=audience_score)) +
+  geom_boxplot(fill="lightblue") +
+  labs(x = "", y = "Audience Score", title = "Audience Score by Genre") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+ggplot(movies, aes(x=factor(genre))) +
+  geom_bar(fill="lightblue") +
+  labs(x = "", y = "Audience Score", title = "Number of films by Genre") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+movies %>%
+  group_by(genre) %>%
+  summarise(count = n(), avg_audience_score = mean(audience_score), median_audience_score = median(audience_score))
+```
+47% of the data set are Drama films with the average audience score 65. At the same time Documentary and Musical & Performing Arts films have average rating above 80.  Action & Adventure, Comedy, Mystery & Suspense films have audience rating far below the average. It could be expalined by the small number of the films in particular genres in the available data set. 
+
+Next we will conduct a hypothesis test whether there is a difference between Drama and Non-Drama films.
+
+$$ H_1 = H_2 $$
+$$ H_1 \ne H_2 $$
+ 
+```{r}
+statsr::bayes_inference(y = audience_score, x = drama, 
+                data = movies_new, statistic = "mean", 
+                type = "ht",null=0, alternative = "twosided")
+ 
+```
+
+The result is showing that there is strong evidence against H1,  which means that there is a significant difference of mean audience score between Drama and Non-Drama films.
+
+# MPAA Rating
+Audience score distribution between <b>mpaa-ratings</b> are the same. The hypothesis test shows a positive evidence against H2, which means there is no significant difference of mean audience score between mpaa-raings.
+```{r mpaa_rating}
+ggplot(movies_new, aes(mpaa_rating, audience_score)) + 
+  geom_point(alpha = 0.6) +
+  xlab("Run_Time") +
+  ylab("AudienceScore") +
+  ggtitle("Run time Vs Audience") + 
+  stat_smooth(method = "lm", se = FALSE)
+
+statsr::bayes_inference(y = audience_score, x = mpaa_rating_R, 
+                data = movies_new, statistic = "mean", 
+                type = "ht",null=0, alternative = "twosided")
+```
+
+# Oscar / Summer Season
+
+Audience score distribution between <b>thtr_rel_month</b> are prety the same. The hypothesis test conducted on <b>oscar_season</b> and <b>summer_season</b> variables represent a positive evidence against H2, which means there is no significant difference of mean audience score between Oscar vs non Oscar ,and summer and non-summer seasons.
+
+```{r}
+ggplot(movies_new, aes(thtr_rel_month, audience_score)) + 
+  geom_point(alpha = 0.6) +
+  xlab("Run_Time") +
+  ylab("AudienceScore") +
+  ggtitle("Run time Vs Audience") + 
+  stat_smooth(method = "lm", se = FALSE)
+
+statsr::bayes_inference(y = audience_score, x = oscar_season, 
+                data = movies_new, statistic = "mean", 
+                type = "ht",null=0, alternative = "twosided") 
+
+statsr::bayes_inference(y = audience_score, x = summer_season, 
+                data = movies_new, statistic = "mean", 
+                type = "ht",null=0, alternative = "twosided") 
+
+```
+
+Only 2 of the new constructed variables will be used for the modeling: <b> feature_film and drama </b>, which have significant evidence of being influenced to the audience score.
+ 
+* * *
+
+## Part 4: Modeling
+
+In this chapter I will conduct the modeling for the audience score. Firstly, I select only variables I will use for the modeling:
+```{r}
+df_model <- dplyr::select(movies_new, audience_score, feature_film, drama,
+                runtime, thtr_rel_year, imdb_rating, imdb_num_votes, 
+                critics_score, best_pic_nom, best_pic_win, best_actor_win, 
+                best_actress_win, best_dir_win, top200_box)
+
+```
+
+The full liniar model have many coefficients of independent variables are not statistically significant.
+```{r}
+m_model_full <- lm(audience_score ~ . - audience_score, data = na.omit(df_model))
+
+tidy(m_model_full)
+```
+
+As the purpose of this project is to build a predictive model, I will use a least restricted AIC method. With AIC some non-informative  variables could be included in the model for better prediciton. 
+
+```{r aic}
+model_aic = bas.lm(audience_score ~ . -audience_score, data = df_model,  
+                   prior = "AIC", modelprior = uniform())
+
+round(summary(model_aic),2)
+ 
+image(model_aic, rotate=FALSE, intensity=TRUE)
+``` 
+
+As you can see runtime, imdb_rating, critics_score, best_pic_nom variables exists in most of the models.
+
+```{r}
+confint(coef(model_aic))
+
+coef(model_aic)
+```
+
+```{r}
+
+plot(model_aic, ask=F)
+```
+
+According to diagnostic there are a few outliers at rows 124, 246, and 212. Additionally the residual plot doesn’t look quite random. There are many positive residuals for the lower predicted scores. Hence movies with low scores aren’t quite as low as we are predicting.
+
+The model completity appears to peak around the 5 to 9 mark which makes sense given that we have 6 variables in our model.
+
+* * *
+
+## Part 5: Prediction
+
+Let’s find predictive values under the best predictive model, the one that has predictions closest to BMA and corresponding posterior standard deviations.
+
+To test a model I chose 3 films.
+
+<b>Arrival</b> 
+
+https://www.imdb.com/title/tt2543164/
+
+https://www.rottentomatoes.com/m/arrival_2016
+
+```{r}
+movie_p <- data.frame(runtime = 116, 
+                      thtr_rel_year = 2016,
+                      feature_film = 'yes', 
+                      drama = 'yes', 
+                      imdb_rating = 7.9,
+                      critics_score = 94, 
+                      imdb_num_votes = 488604,
+                      best_pic_win = 'no',
+                      best_pic_nom = 'no',
+                      best_actor_win = 'no', 
+                      best_actress_win = 'no',
+                      best_dir_win = 'no',
+                      top200_box = 'no')
+
+prediction_Revenant <- predict(model_aic, newdata=movie_p, estimator="BPM")
+prediction_Revenant$Ybma
+
+```
+
+The predicted audience score 85.8 is fairly close to the actual rating 82.
+
+<b> La La Land </b>
+
+https://www.imdb.com/title/tt3783958/
+
+https://www.rottentomatoes.com/m/la_la_land
+
+```{r}
+movie_p <- data.frame(runtime = 128, 
+                      thtr_rel_year = 2016,
+                      feature_film = 'yes', 
+                      drama = 'yes', 
+                      imdb_rating = 8,
+                      critics_score = 81, 
+                      imdb_num_votes = 412821,
+                      best_pic_win = 'no',
+                      best_pic_nom = 'yes',
+                      best_actor_win = 'no', 
+                      best_actress_win = 'yes',
+                      best_dir_win = 'yes',
+                      top200_box = 'no')
+
+prediction_Revenant <- predict(model_aic, newdata=movie_p, estimator="BPM")
+prediction_Revenant$Ybma
+```
+
+The predicted audience score 86.7 is fairly close to the actual rating 81.
+
+<b>Norm of the North </b>
+
+https://www.imdb.com/title/tt1594972/?ref_=ttls_li_tt
+
+https://www.rottentomatoes.com/m/norm_of_the_north
+
+```{r}
+movie_p <- data.frame(runtime = 90, 
+                      thtr_rel_year = 2016,
+                      feature_film = 'yes', 
+                      drama = 'yes', 
+                      imdb_rating = 3.6,
+                      critics_score = 9, 
+                      imdb_num_votes = 7743,
+                      best_pic_win = 'no',
+                      best_pic_nom = 'no',
+                      best_actor_win = 'no', 
+                      best_actress_win = 'no',
+                      best_dir_win = 'no',
+                      top200_box = 'no')
+
+prediction_Revenant <- predict(model_aic, newdata=movie_p, estimator="BPM")
+prediction_Revenant$Ybma
+```
+
+The predicted audience score 16.5 is fairly close to the actual rating 22.
+
+* * *
+
+## Part 6: Conclusion
+The predictive model satisfies the expectation even though the diagnostics were not very good. Some limitations of this work consisted on the very small sample population. 
+
+At the same time, predicting of Rotten Tomatoes audience score based on IMDB Rating seems quite useless due to the fact that the same audience evaluate films on both web-sites. However, I gained good knowledge of Bayesian statiscs while doing the project.
